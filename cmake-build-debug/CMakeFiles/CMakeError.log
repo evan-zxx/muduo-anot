@@ -1,0 +1,19 @@
+Determining if the function accept4 exists failed with the following output:
+Change Dir: /Users/evan/Documents/xmly/muduo/cmake-build-debug/CMakeFiles/CMakeTmp
+
+Run Build Command:"/usr/bin/make" "cmTC_69027/fast"
+/Library/Developer/CommandLineTools/usr/bin/make -f CMakeFiles/cmTC_69027.dir/build.make CMakeFiles/cmTC_69027.dir/build
+Building C object CMakeFiles/cmTC_69027.dir/CheckFunctionExists.c.o
+/Library/Developer/CommandLineTools/usr/bin/cc   -DCHECK_FUNCTION_EXISTS=accept4 -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX10.14.sdk   -o CMakeFiles/cmTC_69027.dir/CheckFunctionExists.c.o   -c /Applications/CLion.app/Contents/bin/cmake/mac/share/cmake-3.13/Modules/CheckFunctionExists.c
+Linking C executable cmTC_69027
+/Applications/CLion.app/Contents/bin/cmake/mac/bin/cmake -E cmake_link_script CMakeFiles/cmTC_69027.dir/link.txt --verbose=1
+/Library/Developer/CommandLineTools/usr/bin/cc  -DCHECK_FUNCTION_EXISTS=accept4 -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX10.14.sdk -Wl,-search_paths_first -Wl,-headerpad_max_install_names   CMakeFiles/cmTC_69027.dir/CheckFunctionExists.c.o  -o cmTC_69027 
+Undefined symbols for architecture x86_64:
+  "_accept4", referenced from:
+      _main in CheckFunctionExists.c.o
+ld: symbol(s) not found for architecture x86_64
+clang: error: linker command failed with exit code 1 (use -v to see invocation)
+make[1]: *** [cmTC_69027] Error 1
+make: *** [cmTC_69027/fast] Error 2
+
+

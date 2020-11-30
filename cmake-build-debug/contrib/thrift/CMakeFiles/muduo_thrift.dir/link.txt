@@ -1,0 +1,2 @@
+/Library/Developer/CommandLineTools/usr/bin/ar qc ../../lib/libmuduo_thrift.a  CMakeFiles/muduo_thrift.dir/ThriftConnection.cc.o CMakeFiles/muduo_thrift.dir/ThriftServer.cc.o
+/Library/Developer/CommandLineTools/usr/bin/ranlib ../../lib/libmuduo_thrift.a

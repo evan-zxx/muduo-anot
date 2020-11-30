@@ -1,0 +1,9 @@
+"/Applications/CLion 2.app/Contents/bin/cmake/mac/bin/cmake" -DCMAKE_BUILD_TYPE=Debug -G "CodeBlocks - Unix Makefiles" /Users/evan/Documents/xmly/muduo
+-- found curl
+-- found protobuf
+-- found zlib
+-- found thrift
+-- CXX_FLAGS = -g -DCHECK_PTHREAD_RETURN_VALUE -D_FILE_OFFSET_BITS=64 -Wall -Wextra -Werror -Wconversion -Wno-unused-parameter -Wold-style-cast -Woverloaded-virtual -Wpointer-arith -Wshadow -Wwrite-strings -march=native -std=c++11 -Wno-null-dereference -Wno-sign-conversion -Wno-unused-local-typedef -Wthread-safety -O0
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /Users/evan/Documents/xmly/muduo/cmake-build-debug
