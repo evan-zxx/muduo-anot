@@ -1,2 +1,0 @@
-/Library/Developer/CommandLineTools/usr/bin/ar qc ../../../lib/libsudoku_proto.a  CMakeFiles/sudoku_proto.dir/sudoku.pb.cc.o
-/Library/Developer/CommandLineTools/usr/bin/ranlib ../../../lib/libsudoku_proto.a
