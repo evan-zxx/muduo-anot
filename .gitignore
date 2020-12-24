@@ -1,0 +1,12 @@
+.idea
+*.iml
+*.out
+*.pyc
+out
+gen
+build
+buildx
+cmake-build-debug
+log
+logs
+bin
