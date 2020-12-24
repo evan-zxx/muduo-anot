@@ -140,23 +140,26 @@ void TcpConnection::sendInLoop(const void *data, size_t len) {
     // 如果out buffer中本身就有数据 则暂时不去发送 因为会造成数据乱序 直接先将数据写入buffer
     // 也就是只有wbuffer为空的时候, 业务触发的主动write才会直接写fd
     if (!channel_->isWriting() && outputBuffer_.readableBytes() == 0) {
-        // 这里只调用一次write 而不会反复调用直到EAGAIN: 因为如果第一次如果没有将数据发送完, 第二次调用几乎肯定是EAGAIN
-        // 不影响正确性的前提下 省掉这次调用
-        nwrote = sockets::write(channel_->fd(), data, len);
-        if (nwrote >= 0) {
-            remaining = len - nwrote;
-            if (remaining == 0 && writeCompleteCallback_) {
-                loop_->queueInLoop(std::bind(writeCompleteCallback_, shared_from_this()));
-            }
-        } else // nwrote < 0
-        {
-            nwrote = 0;
-            if (errno != EWOULDBLOCK) {
-                LOG_SYSERR << "TcpConnection::sendInLoop";
-                if (errno == EPIPE || errno == ECONNRESET) // FIXME: any others?
-                {
-                    faultError = true;
+        while (true) {
+            nwrote = sockets::write(channel_->fd(), data, len);
+            if (nwrote > 0) {
+                remaining = len - nwrote;
+                if (remaining == 0 && writeCompleteCallback_) {
+                    loop_->queueInLoop(std::bind(writeCompleteCallback_, shared_from_this()));
                 }
+            } else if (nwrote == 0) {
+                break;
+            } else { // nwrote < 0
+                nwrote = 0;
+                if (errno == EWOULDBLOCK || errno == EAGAIN) {
+
+                } else {
+                    LOG_SYSERR << "TcpConnection::sendInLoop";
+                    if (errno == EPIPE || errno == ECONNRESET) { // FIXME: any others?
+                        faultError = true;
+                    }
+                }
+                break;
             }
         }
     }
@@ -180,6 +183,85 @@ void TcpConnection::sendInLoop(const void *data, size_t len) {
         }
     }
 }
+
+
+void TcpConnection::handleRead(Timestamp receiveTime) {
+    loop_->assertInLoopThread();
+    int savedErrno = 0;
+    // 从fd内核缓存中读数据到应用层buffer
+    // 这里只调用一次read() 并没有循环调用直到返回EAGAIN.
+    // 因为muduo采用level trigger, 这么做不会丢失消息数据
+    // 其次, 对延迟要求更高的程序这么做是高效的, 因为每次读取只系统调用一次read.
+    // 其次, 照顾了整体连接的公平性, 不会因为某个连接数据大而影响其他连接(如果循环read)
+    // 如果采用edge trigger, read系统调用至少需要两次, 不见得高效(前提是read只调用了一次)
+    // 所以edge trigger或许可以使得eventloop的返回次数变少, 但每次返回的read系统调用一定会更多
+    // to et
+    while (true) {
+        ssize_t n = inputBuffer_.readFd(channel_->fd(), &savedErrno);
+        if (n > 0) {
+            // 如果读到数据 将数据(整个buffer)传递到业务
+            // 因为有可能黏包情况, 上次剩余0.5个buffer没来得及处理
+            messageCallback_(shared_from_this(), &inputBuffer_, receiveTime);
+        } else if (n == 0) {
+            // 客户端调用了close()/shutdown触发了fin
+            // 服务端被动关闭
+            handleClose();
+        } else {
+            if (errno == EWOULDBLOCK || errno == EAGAIN) {
+
+            } else {
+                errno = savedErrno;
+                LOG_SYSERR << "TcpConnection::handleRead";
+                handleError();
+            }
+            break;
+        }
+    }
+}
+
+
+// 当socket可写时 channel会调用此函数
+// 也就是上面sendInLoop业务主动触发的send没有将数据写完, 剩余数据写进了buffer并注册了写事件
+// 当fd变得可写 就会触发这里返回 继续写上次没写完的数据
+void TcpConnection::handleWrite() {
+    loop_->assertInLoopThread();
+    if (channel_->isWriting()) {
+        while (true) {
+            // 将wbuffer中数据写入socket
+            ssize_t n = sockets::write(channel_->fd(),
+                                       outputBuffer_.peek(),
+                                       outputBuffer_.readableBytes());
+            if (n > 0) {
+                outputBuffer_.retrieve(n);
+                // 如果数据写完了
+                if (outputBuffer_.readableBytes() == 0) {
+                    // 取消可写事件 防止busy loop
+                    // 如果依然注册着可写事件 没有数据可写 但epoll会在下一次loop返回
+                    // et下不用取消
+                    //channel_->disableWriting();
+                    if (writeCompleteCallback_) {
+                        loop_->queueInLoop(std::bind(writeCompleteCallback_, shared_from_this()));
+                    }
+                    if (state_ == kDisconnecting) {
+                        shutdownInLoop();
+                    }
+                }
+            } else if (n == 0) {
+                break;
+            } else { // nwrote < 0
+                if (errno == EWOULDBLOCK || errno == EAGAIN) {
+
+                } else {
+                    LOG_SYSERR << "TcpConnection::sendInLoop";
+                }
+                break;
+            }
+        }
+    } else {
+        LOG_TRACE << "Connection fd = " << channel_->fd() << " is down, no more writing";
+    }
+}
+
 
 void TcpConnection::shutdown() {
     // FIXME: use compare and swap
@@ -297,7 +379,10 @@ void TcpConnection::connectEstablished() {
     assert(state_ == kConnecting);
     setState(kConnected);
     channel_->tie(shared_from_this());
-    channel_->enableReading();
+
+    //channel_->enableReading();
+    // et mode
+    channel_->enableETReadingWriting();
 
     connectionCallback_(shared_from_this());
 }
@@ -313,69 +398,6 @@ void TcpConnection::connectDestroyed() {
         connectionCallback_(shared_from_this());
     }
     channel_->remove();
-}
-
-void TcpConnection::handleRead(Timestamp receiveTime) {
-    loop_->assertInLoopThread();
-    int savedErrno = 0;
-    // 从fd内核缓存中读数据到应用层buffer
-    // 这里只调用一次read() 并没有循环调用直到返回EAGAIN.
-    // 因为muduo采用level trigger, 这么做不会丢失消息数据
-    // 其次, 对延迟要求更高的程序这么做是高效的, 因为每次读取只系统调用一次read.
-    // 其次, 照顾了整体连接的公平性, 不会因为某个连接数据大而影响其他连接(如果循环read)
-    // 如果采用edge trigger, read系统调用至少需要两次, 不见得高效(前提是read只调用了一次)
-    // 所以edge trigger或许可以使得eventloop的返回次数变少, 但每次返回的read系统调用一定会更多.?
-    ssize_t n = inputBuffer_.readFd(channel_->fd(), &savedErrno);
-    if (n > 0) {
-        // 如果读到数据 将数据(整个buffer)传递到业务
-        // 因为有可能黏包情况, 上次剩余0.5个buffer没来得及处理
-        messageCallback_(shared_from_this(), &inputBuffer_, receiveTime);
-    } else if (n == 0) {
-        // 客户端调用了close()/shutdown触发了fin
-        // 服务端被动关闭
-        handleClose();
-    } else {
-        errno = savedErrno;
-        LOG_SYSERR << "TcpConnection::handleRead";
-        handleError();
-    }
-}
-
-// 当socket可写时 channel会调用此函数
-// 也就是上面sendInLoop业务主动触发的send没有将数据写完, 剩余数据写进了buffer并注册了写事件
-// 当fd变得可写 就会触发这里返回 继续写上次没写完的数据
-void TcpConnection::handleWrite() {
-    loop_->assertInLoopThread();
-    if (channel_->isWriting()) {
-        // 将wbuffer中数据写入socket
-        ssize_t n = sockets::write(channel_->fd(),
-                                   outputBuffer_.peek(),
-                                   outputBuffer_.readableBytes());
-        if (n > 0) {
-            outputBuffer_.retrieve(n);
-            // 如果数据写完了
-            if (outputBuffer_.readableBytes() == 0) {
-                // 取消可写事件 防止busy loop
-                // 如果依然注册着可写事件 没有数据可写 但epoll会在下一次loop返回
-                channel_->disableWriting();
-                if (writeCompleteCallback_) {
-                    loop_->queueInLoop(std::bind(writeCompleteCallback_, shared_from_this()));
-                }
-                if (state_ == kDisconnecting) {
-                    shutdownInLoop();
-                }
-            }
-        } else {
-            LOG_SYSERR << "TcpConnection::handleWrite";
-            // if (state_ == kDisconnecting)
-            // {
-            //   shutdownInLoop();
-            // }
-        }
-    } else {
-        LOG_TRACE << "Connection fd = " << channel_->fd()
-                  << " is down, no more writing";
-    }
 }
 
 void TcpConnection::handleClose() {

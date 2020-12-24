@@ -67,6 +67,10 @@ class Channel : noncopyable
   bool isWriting() const { return events_ & kWriteEvent; }
   bool isReading() const { return events_ & kReadEvent; }
 
+  void enableETReading() { events_ |= kETReadEvent; update(); }
+  void enableETWriting() { events_ |= kETWriteEvent; update(); }
+  void enableETReadingWriting() { events_ |= kETReadingWriteEvent; update(); }
+
   // for Poller
   int index() { return index_; }
   void set_index(int idx) { index_ = idx; }
@@ -89,6 +93,9 @@ class Channel : noncopyable
   static const int kNoneEvent;
   static const int kReadEvent;
   static const int kWriteEvent;
+  static const int kETReadEvent;
+  static const int kETWriteEvent;
+  static const int kETReadingWriteEvent;
 
   EventLoop* loop_;
   const int  fd_;
